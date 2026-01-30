@@ -53,11 +53,21 @@ class FastestLapWrapper:
     def create_vehicle(self, vehicle_def, vehicle_file):
         if self.mock_mode:
             return
+        # Try to delete first to avoid "already exists" error
+        try:
+            self.lib.delete_variable(vehicle_def)
+        except:
+            pass
         self.lib.create_vehicle_from_xml(vehicle_def, vehicle_file)
 
     def create_track(self, track_name, track_file):
         if self.mock_mode:
             return
+        # Try to delete first to avoid "already exists" error
+        try:
+            self.lib.delete_variable(track_name)
+        except:
+            pass
         self.lib.create_track_from_xml(track_name, track_file)
 
     def optimize(self, vehicle_def, track_name, n_points=400):
@@ -67,6 +77,12 @@ class FastestLapWrapper:
         
         # Real simulation
         try:
+            # Pre-flight checks
+            track_xml = TrackManager().get_track_xml_path(track_name)
+            if not os.path.exists(track_xml):
+                print(f"Track file not found: {track_xml}")
+                return None
+                
             # 1. Download track data (arclength)
             s = self.lib.track_download_data(track_name, "arclength")
             
@@ -83,15 +99,28 @@ class FastestLapWrapper:
             self.lib.delete_variable("run/*")
             
             # Combine into a nice dict/df
-            return {
-                "x": run_data["x"],
-                "y": run_data["y"],
-                "u": run_data["u"], # speed usually
-                "time": run_data["time"],
-                "s": s
-            }
+            try:
+                # Helper to find key
+                def get_var(keys, preferred):
+                     for k in preferred:
+                         if k in keys: return keys[k]
+                     raise KeyError(f"Could not find any of {preferred}")
+
+                return {
+                    "x": get_var(run_data, ["x", "chassis.position.x"]),
+                    "y": get_var(run_data, ["y", "chassis.position.y"]),
+                    "u": get_var(run_data, ["u", "chassis.velocity.x", "vehicle.velocity.x"]), # speed usually
+                    "time": get_var(run_data, ["time"]),
+                    "s": s
+                }
+            except KeyError as e:
+                print(f"Missing key in simulation result: {e}")
+                print(f"Available keys: {list(run_data.keys())}")
+                return None
         except Exception as e:
-            print(f"Error in optimization: {e}")
+            print(f"Error in optimization for {vehicle_def} at {track_name}: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def _generate_mock_data(self, n_points, track_name=None, vehicle_name="vehicle"):
@@ -372,3 +401,57 @@ class VehicleManager:
         
         tree.write(path)
 
+
+# --- Result Persistence ---
+
+class ResultManager:
+    def __init__(self):
+        self.base_dir = os.path.abspath(os.path.join(DATABASE_DIR, "..", "data", "results"))
+        self.telemetry_dir = os.path.join(self.base_dir, "telemetry")
+        self.summary_file = os.path.join(self.base_dir, "summary.csv")
+        
+        # Ensure directories exist
+        os.makedirs(self.telemetry_dir, exist_ok=True)
+
+    def save_run(self, vehicle, track, run_data, run_id=None):
+        import datetime
+        import uuid
+        
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if not run_id:
+            run_id = str(uuid.uuid4())[:8]
+
+        # 1. Save Telemetry
+        # Need to ensure run_data['x'] etc are lists, not just raw dict
+        # run_data is usually a dict of lists
+        df = pd.DataFrame(run_data)
+        
+        telem_filename = f"{timestamp.replace(':','-').replace(' ','_')}_{vehicle}_{track}.csv"
+        telem_path = os.path.join(self.telemetry_dir, telem_filename)
+        df.to_csv(telem_path, index=False)
+        
+        # 2. Append to Summary
+        # Safely get scalar values
+        lap_time = run_data['time'][-1]
+        max_speed = max(run_data['u']) * 3.6
+        
+        summary_record = {
+            "timestamp": timestamp,
+            "run_id": run_id,
+            "vehicle": vehicle,
+            "track": track,
+            "lap_time_s": lap_time,
+            "max_speed_kmh": max_speed,
+            "telemetry_file": telem_filename
+        }
+        
+        # Convert to DF for easy CSV handling
+        df_summary = pd.DataFrame([summary_record])
+        
+        if not os.path.exists(self.summary_file):
+            df_summary.to_csv(self.summary_file, index=False)
+        else:
+            df_summary.to_csv(self.summary_file, mode='a', header=False, index=False)
+            
+        print(f"Saved run {run_id} to {self.summary_file}")
+        return run_id

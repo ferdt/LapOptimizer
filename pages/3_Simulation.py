@@ -85,22 +85,36 @@ if run_btn:
         vehicle_xml = os.path.join(DATABASE_DIR, f"vehicles/{v_type}/{v_file}")
             
         # Load and Run
-        # We need unique names for the vehicle instance in the lib
-        wrapper.create_vehicle(label, vehicle_xml)
-        wrapper.create_track(track_name, track_xml) 
-        return wrapper.optimize(label, track_name)
+        try:
+            # We need unique names for the vehicle instance in the lib
+            wrapper.create_vehicle(label, vehicle_xml)
+            wrapper.create_track(track_name, track_xml) 
+            return wrapper.optimize(label, track_name)
+        except Exception as e:
+            print(f"Error in run_sim for {v_file}: {e}")
+            return None
 
     with st.spinner("Running Simulations..."):
         try:
             for idx, v_raw in enumerate(selected_vehicles_raw):
                 v_type, v_file = v_raw.split(" / ")
                 label = f"car_{idx}"
-                results[v_file] = run_sim(v_type, v_file, label)
+                res = run_sim(v_type, v_file, label)
+                if res is not None:
+                    results[v_file] = res
+                    # Auto-save results
+                    try:
+                        rm = ResultManager()
+                        rm.save_run(v_file, track_name, res)
+                    except Exception as e:
+                        print(f"Failed to auto-save results for {v_file}: {e}")
+                else:
+                    st.warning(f"⚠️ Simulation failed for {v_file}. Skipping.")
                 
             st.session_state.sim_results = results
             
         except Exception as e:
-            st.error(f"Simulation failed: {e}")
+            st.error(f"Simulation loop crashed: {e}")
 
 # --- Visualization ---
 
@@ -110,10 +124,17 @@ if st.session_state.sim_results:
     # 1. Summary Table
     st.subheader("📊 Results Summary")
     summary_data = []
+
+    def format_time(seconds):
+        m = int(seconds // 60)
+        s = seconds % 60
+        return f"{m:02d}:{s:06.3f}"
+
     for name, res in results.items():
+        if res is None: continue
         summary_data.append({
             "Vehicle": name,
-            "Lap Time (s)": f"{res['time'][-1]:.3f}",
+            "Lap Time": format_time(res['time'][-1]),
             "Max Speed (km/h)": f"{max(res['u']) * 3.6:.2f}"
         })
     st.table(pd.DataFrame(summary_data))
@@ -121,6 +142,7 @@ if st.session_state.sim_results:
     # Prepare Combined DataFrame
     dfs = []
     for name, res in results.items():
+        if res is None: continue
         d = pd.DataFrame({
             'x': res['x'],
             'y': res['y'],
@@ -132,7 +154,11 @@ if st.session_state.sim_results:
         })
         dfs.append(d)
         
-    df = pd.concat(dfs)
+    if not dfs:
+        st.error("No simulations succeeded. Please check your configuration or logs.")
+        st.stop()
+    else:
+        df = pd.concat(dfs)
     
     # --- Calculate Domains for Equal Aspect Ratio ---
     min_x, max_x = df['x'].min(), df['x'].max()
@@ -156,9 +182,14 @@ if st.session_state.sim_results:
     domain_x = [mid_x - max_range/2, mid_x + max_range/2]
     domain_y = [mid_y + max_range/2, mid_y - max_range/2]
     
+    # --- Debug Info ---
+    # st.write("Debug: DataFrame Head", df.head())
+    # st.write(f"Debug: Domain X: {domain_x}, Domain Y: {domain_y}")
+
     # --- Altair Charts ---
     
     hover = alt.selection_point(
+        name="hover_pt",
         fields=['idx'], 
         nearest=True, 
         on='mouseover', 
@@ -168,25 +199,59 @@ if st.session_state.sim_results:
     
     color_scale = alt.Scale(scheme='category10')
 
+    # --- Load Track Limits ---
+    track_data = tm.load_track_data(track_name)
+    limits_layers = []
+    
+    if track_data:
+        # Prepare DataFrames for limits (Optimized: Minimal columns)
+        # Slicing to reduce data size if track is huge could be good, but full res is fine for now
+        df_left = pd.DataFrame({'x': track_data['left']['x'], 'y': track_data['left']['y']})
+        df_right = pd.DataFrame({'x': track_data['right']['x'], 'y': track_data['right']['y']})
+        
+        # DEBUG
+        # st.write(f"Track Limits Loaded: Left={len(df_left)} pts, Right={len(df_right)} pts")
+        
+        # We need to make sure these don't interfere with the map domain/scale. 
+        # Explicitly using the same scale/domain is correct as done in map_base for x/y
+        
+        l_layer = alt.Chart(df_left).mark_line(color='black', strokeDash=[5,5]).encode(
+             x=alt.X('x', scale=alt.Scale(domain=domain_x)),
+             y=alt.Y('y', scale=alt.Scale(domain=domain_y))
+        )
+        r_layer = alt.Chart(df_right).mark_line(color='black', strokeDash=[5,5]).encode(
+             x=alt.X('x', scale=alt.Scale(domain=domain_x)),
+             y=alt.Y('y', scale=alt.Scale(domain=domain_y))
+        )
+        limits_layers = [l_layer, r_layer]
+
     # 1. Track Map
     map_base = alt.Chart(df).encode(
         x=alt.X('x', axis=None, title='', scale=alt.Scale(domain=domain_x)),
         y=alt.Y('y', axis=None, title='', scale=alt.Scale(domain=domain_y)),
         color=alt.Color('Vehicle', scale=color_scale)
     ).properties(
-        title="Track Map & Trajectory",
-        height=600,
-        width=600
+        title=f"Track Map & Trajectory: {track_name}",
+        width='container',
+        height=600 # Keeping fixed height for aspect ratio sanity, but width fills
     )
 
     map_scatter = map_base.mark_circle(size=30).encode(
         tooltip=['Vehicle', 's', 'time', 'u'],
         opacity=alt.condition(hover, alt.value(1), alt.value(0.1))
-    ).add_params(hover)
+    )
     
     map_point = map_base.mark_circle(size=100, color='red').encode().transform_filter(hover)
     
-    map_layer = (map_scatter + map_point).interactive()
+    # Add interaction to map
+    map_layer = (map_scatter + map_point).add_params(hover).interactive()
+    
+    
+    if limits_layers:
+        # Use '+' instead of alt.layer to keep interaction logic cleaner if possible, 
+        # or just alt.layer but ensure order
+        # limits_layers[0] is left, [1] is right
+        map_layer = alt.layer(limits_layers[0], limits_layers[1], map_layer)
 
     # 2. Speed Profile
     telem_base = alt.Chart(df).encode(
@@ -194,6 +259,7 @@ if st.session_state.sim_results:
         color=alt.Color('Vehicle', scale=color_scale)
     ).properties(
         title="Speed Profile",
+        width='container',
         height=400
     )
     
@@ -206,8 +272,9 @@ if st.session_state.sim_results:
     
     telem_rule = telem_base.mark_rule(color='gray').encode().transform_filter(hover)
     
-    telem_layer = (telem_line + telem_point + telem_rule).interactive()
+    telem_layer = (telem_line + telem_point + telem_rule)
 
+    # Layout: Stacking vertically & resolver
     # Layout: Stacking vertically & resolver
     final_chart = alt.vconcat(
         map_layer,
@@ -220,6 +287,11 @@ if st.session_state.sim_results:
         color='gray'
     )
     
+    # DEBUG: Try rendering ONLY the map layer first
+    # final_chart = map_layer.properties(title="Debug Map Layer")
+    
+    # Reverting to use_container_width=True as primary to ensure visibility. 
+    # The warning is annoying but preferable to a blank screen.
     st.altair_chart(final_chart, use_container_width=True)
     
 elif not run_btn:
