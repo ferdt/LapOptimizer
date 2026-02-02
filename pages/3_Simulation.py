@@ -2,7 +2,8 @@ import streamlit as st
 import altair as alt
 import pandas as pd
 import numpy as np
-from utils import FastestLapWrapper, TrackManager, VehicleManager, DATABASE_DIR
+from utils import FastestLapWrapper, TrackManager, VehicleManager, ResultManager, DATABASE_DIR
+from plot_generator import generate_track_plot
 import os
 
 st.set_page_config(page_title="Simulation", page_icon="⏱️", layout="wide")
@@ -16,22 +17,6 @@ vm = VehicleManager()
 
 if wrapper.mock_mode:
     st.warning("⚠️ **MOCK MODE ACTIVE**: The `fastest_lap` library was not found. Simulations are generating fake data for visualization testing only.")
-
-import streamlit as st
-import altair as alt
-import pandas as pd
-import numpy as np
-from utils import FastestLapWrapper, TrackManager, VehicleManager, DATABASE_DIR
-import os
-
-st.set_page_config(page_title="Simulation", page_icon="⏱️", layout="wide")
-
-st.title("⏱️ Optimal Lap Time Simulation")
-
-# --- Setup ---
-wrapper = FastestLapWrapper()
-tm = TrackManager()
-vm = VehicleManager()
 
 # --- session_state initialization ---
 if 'sim_results' not in st.session_state:
@@ -138,6 +123,55 @@ if st.session_state.sim_results:
             "Max Speed (km/h)": f"{max(res['u']) * 3.6:.2f}"
         })
     st.table(pd.DataFrame(summary_data))
+    
+    # --- Export Section ---
+    st.subheader("📥 Export High-Quality Plots")
+    st.markdown("Generate publication-quality matplotlib plots for each vehicle")
+    
+    # Create columns for export buttons
+    cols = st.columns(min(len(results), 4))  # Max 4 columns
+    
+    for idx, (name, res) in enumerate(results.items()):
+        if res is None:
+            continue
+            
+        col_idx = idx % 4
+        with cols[col_idx]:
+            # Generate filename
+            safe_name = name.replace('.xml', '').replace(' ', '_')
+            filename = f"{track_name}_{safe_name}_plot.png"
+            
+            if st.button(f"Export {name}", key=f"export_{idx}"):
+                with st.spinner(f"Generating plot for {name}..."):
+                    try:
+                        # Get track coordinates
+                        track_coords = wrapper.get_track_coordinates(track_name)
+                        
+                        # Generate plot
+                        img_buffer = generate_track_plot(
+                            vehicle_name=name,
+                            track_name=track_name,
+                            run_data=res,
+                            track_coords=track_coords,
+                            dpi=150
+                        )
+                        
+                        # Create download button
+                        st.download_button(
+                            label=f"⬇️ Download {name}",
+                            data=img_buffer,
+                            file_name=filename,
+                            mime="image/png",
+                            key=f"download_{idx}"
+                        )
+                        st.success(f"Plot generated successfully!")
+                        
+                    except Exception as e:
+                        st.error(f"Error generating plot: {e}")
+                        import traceback
+                        traceback.print_exc()
+    
+    st.divider()
     
     # Prepare Combined DataFrame
     dfs = []

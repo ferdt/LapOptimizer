@@ -123,6 +123,33 @@ class FastestLapWrapper:
             traceback.print_exc()
             return None
 
+    def get_track_coordinates(self, track_name):
+        """
+        Get track coordinates (centerline, left boundary, right boundary) using TrackManager.
+        Returns dict with x_center, y_center, x_left, y_left, x_right, y_right.
+        """
+        try:
+            from utils import TrackManager
+            tm = TrackManager()
+            track_data = tm.load_track_data(track_name)
+            
+            if not track_data:
+                return None
+            
+            # Extract coordinates from track_data
+            return {
+                'x_center': track_data.get('centerline', {}).get('x', []),
+                'y_center': track_data.get('centerline', {}).get('y', []),
+                'x_left': track_data.get('left', {}).get('x', []),
+                'y_left': track_data.get('left', {}).get('y', []),
+                'x_right': track_data.get('right', {}).get('x', []),
+                'y_right': track_data.get('right', {}).get('y', [])
+            }
+            
+        except Exception as e:
+            print(f"Error getting track coordinates: {e}")
+            return None
+
     def _generate_mock_data(self, n_points, track_name=None, vehicle_name="vehicle"):
         # Default to circle if no track found
         x = []
