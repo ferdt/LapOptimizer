@@ -90,9 +90,13 @@ if run_btn:
                     # Auto-save results
                     try:
                         rm = ResultManager()
-                        rm.save_run(v_file, track_name, res)
+                        run_id = rm.save_run(v_file, track_name, res)
+                        print(f"✓ Saved telemetry for {v_file} (ID: {run_id})")
                     except Exception as e:
+                        st.error(f"Failed to save results for {v_file}: {e}")
                         print(f"Failed to auto-save results for {v_file}: {e}")
+                        import traceback
+                        traceback.print_exc()
                 else:
                     st.warning(f"⚠️ Simulation failed for {v_file}. Skipping.")
                 
@@ -141,35 +145,31 @@ if st.session_state.sim_results:
             safe_name = name.replace('.xml', '').replace(' ', '_')
             filename = f"{track_name}_{safe_name}_plot.png"
             
-            if st.button(f"Export {name}", key=f"export_{idx}"):
-                with st.spinner(f"Generating plot for {name}..."):
-                    try:
-                        # Get track coordinates
-                        track_coords = wrapper.get_track_coordinates(track_name)
-                        
-                        # Generate plot
-                        img_buffer = generate_track_plot(
-                            vehicle_name=name,
-                            track_name=track_name,
-                            run_data=res,
-                            track_coords=track_coords,
-                            dpi=150
-                        )
-                        
-                        # Create download button
-                        st.download_button(
-                            label=f"⬇️ Download {name}",
-                            data=img_buffer,
-                            file_name=filename,
-                            mime="image/png",
-                            key=f"download_{idx}"
-                        )
-                        st.success(f"Plot generated successfully!")
-                        
-                    except Exception as e:
-                        st.error(f"Error generating plot: {e}")
-                        import traceback
-                        traceback.print_exc()
+            # Generate plot data on-demand
+            try:
+                # Get track coordinates
+                track_coords = wrapper.get_track_coordinates(track_name)
+                
+                # Generate plot
+                img_buffer = generate_track_plot(
+                    vehicle_name=name,
+                    track_name=track_name,
+                    run_data=res,
+                    track_coords=track_coords,
+                    dpi=150
+                )
+                
+                # Single download button
+                st.download_button(
+                    label=f"📥 Export {name}",
+                    data=img_buffer,
+                    file_name=filename,
+                    mime="image/png",
+                    key=f"download_{idx}"
+                )
+                
+            except Exception as e:
+                st.error(f"Error: {e}")
     
     st.divider()
     
@@ -322,9 +322,8 @@ if st.session_state.sim_results:
     # DEBUG: Try rendering ONLY the map layer first
     # final_chart = map_layer.properties(title="Debug Map Layer")
     
-    # Reverting to use_container_width=True as primary to ensure visibility. 
-    # The warning is annoying but preferable to a blank screen.
-    st.altair_chart(final_chart, use_container_width=True)
+    # Using new Streamlit syntax for responsive width
+    st.altair_chart(final_chart, width='stretch')
     
 elif not run_btn:
     st.info("Configure simulation in the sidebar.")

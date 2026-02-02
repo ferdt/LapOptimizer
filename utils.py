@@ -86,7 +86,13 @@ class FastestLapWrapper:
             # 1. Download track data (arclength)
             s = self.lib.track_download_data(track_name, "arclength")
             
-            # 2. Run Optimization
+            # 2. Clean up any existing run variables BEFORE optimization
+            try:
+                self.lib.delete_variable("run/*")
+            except:
+                pass  # Ignore if variables don't exist yet
+            
+            # 3. Run Optimization
             options = "<options>"
             options += "    <output_variables>"
             options += "        <prefix>run/</prefix>"
@@ -96,7 +102,12 @@ class FastestLapWrapper:
             
             ret = self.lib.optimal_laptime(vehicle_def, track_name, s, options)
             run_data = self.lib.download_variables(*ret)
-            self.lib.delete_variable("run/*")
+            
+            # Clean up after downloading
+            try:
+                self.lib.delete_variable("run/*")
+            except:
+                pass
             
             # Combine into a nice dict/df
             try:

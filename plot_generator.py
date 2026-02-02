@@ -22,7 +22,7 @@ def generate_track_plot(vehicle_name, track_name, run_data, track_coords, dpi=15
     t = np.array(run_data['time'])
     x = np.array(run_data['x'])
     y = np.array(run_data['y'])
-    u = np.array(run_data['u'])  # Already in km/h
+    u = np.array(run_data['u']) * 3.6  # Convert m/s to km/h
     d = np.array(run_data['s'])
     
     # Calculate laptime
@@ -85,7 +85,8 @@ def generate_track_plot(vehicle_name, track_name, run_data, track_coords, dpi=15
                 linewidth=1, 
                 color=(0.537, 0.604, 0.722, 1.0), 
                 linestyle=(0, (20, 4)),
-                alpha=0.5
+                alpha=0.5,
+                label='Centerline'
             )
     
     # Create line segments for trajectory
@@ -113,6 +114,9 @@ def generate_track_plot(vehicle_name, track_name, run_data, track_coords, dpi=15
     ax1.set_title(f"{track_name} - {vehicle_name} - {laptime_str}")
     ax1.set_aspect('equal')
     ax1.invert_yaxis()
+    
+    # Add legend
+    ax1.legend(loc='upper right', framealpha=0.9)
     
     # Add colorbar
     cbar = plt.colorbar(lc, ax=ax1, orientation='vertical')

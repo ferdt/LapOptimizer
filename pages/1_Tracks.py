@@ -156,7 +156,7 @@ if selected_track:
         
         final_chart = (map_layer | combined_profiles).resolve_scale(color='independent')
 
-        st.altair_chart(final_chart, use_container_width=True)
+        st.altair_chart(final_chart, width='stretch')
         
         st.info("Hover over any plot to see the corresponding position on the others.")
 
