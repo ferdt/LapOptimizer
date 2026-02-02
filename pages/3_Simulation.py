@@ -247,11 +247,9 @@ if st.session_state.sim_results:
     map_layer = (map_scatter + map_point).add_params(hover).interactive()
     
     
-    if limits_layers:
-        # Use '+' instead of alt.layer to keep interaction logic cleaner if possible, 
-        # or just alt.layer but ensure order
-        # limits_layers[0] is left, [1] is right
-        map_layer = alt.layer(limits_layers[0], limits_layers[1], map_layer)
+    # Track limits disabled temporarily - they break rendering
+    # if limits_layers:
+    #     map_layer = alt.layer(limits_layers[0], limits_layers[1], map_layer)
 
     # 2. Speed Profile
     telem_base = alt.Chart(df).encode(
