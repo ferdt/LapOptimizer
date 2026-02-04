@@ -493,3 +493,72 @@ class ResultManager:
             
         print(f"Saved run {run_id} to {self.summary_file}")
         return run_id
+
+    def get_all_results(self):
+        """Returns a list of dictionaries containing all saved results."""
+        if not os.path.exists(self.summary_file):
+            return []
+        try:
+            df = pd.read_csv(self.summary_file)
+            return df.to_dict('records')
+        except Exception as e:
+            print(f"Error reading summary file: {e}")
+            return []
+
+    def load_telemetry(self, run_id=None, telemetry_file=None):
+        """Loads telemetry data for a specific run."""
+        path = None
+        if telemetry_file:
+            path = os.path.join(self.telemetry_dir, telemetry_file)
+        elif run_id:
+            # Need to look up filename from summary if not provided
+            summary = self.get_all_results()
+            for rec in summary:
+                if str(rec.get('run_id')) == str(run_id):
+                    path = os.path.join(self.telemetry_dir, rec['telemetry_file'])
+                    break
+        
+        if not path or not os.path.exists(path):
+            print(f"Telemetry file not found: {path} (run_id: {run_id})")
+            return None
+            
+        try:
+            return pd.read_csv(path)
+        except Exception as e:
+            print(f"Error loading telemetry: {e}")
+            return None
+
+    def delete_run(self, run_id):
+        """Deletes a run from summary and removes telemetry file."""
+        if not os.path.exists(self.summary_file):
+            return False
+            
+        try:
+            df = pd.read_csv(self.summary_file)
+            # Find the row
+            mask = df['run_id'].astype(str) == str(run_id)
+            if not mask.any():
+                return False
+                
+            # Get filename to delete
+            # Check if telemetry_file column exists and has a value
+            row = df.loc[mask]
+            if 'telemetry_file' in row.columns and not row['telemetry_file'].isnull().all():
+                filename = row['telemetry_file'].iloc[0]
+                telem_path = os.path.join(self.telemetry_dir, str(filename))
+                
+                # Delete file
+                if os.path.exists(telem_path):
+                    try:
+                        os.remove(telem_path)
+                    except Exception as e:
+                        print(f"Warning: Could not delete telemetry file {telem_path}: {e}")
+                
+            # Remove from summary
+            df = df[~mask]
+            df.to_csv(self.summary_file, index=False)
+            return True
+            
+        except Exception as e:
+            print(f"Error deleting run {run_id}: {e}")
+            return False

@@ -171,6 +171,46 @@ if st.session_state.sim_results:
             except Exception as e:
                 st.error(f"Error: {e}")
     
+    # --- Export All Vehicles Comparison ---
+    if len(results) > 1:  # Only show if there are multiple vehicles
+        st.markdown("---")
+        st.markdown("### 🏁 Export Comparison Plot")
+        
+        try:
+            # Filter out None results
+            valid_results = {name: res for name, res in results.items() if res is not None}
+            
+            if len(valid_results) > 1:
+                # Get track coordinates
+                track_coords = wrapper.get_track_coordinates(track_name)
+                
+                # Import comparison function
+                from plot_generator import generate_comparison_plot
+                
+                # Generate comparison plot
+                comparison_buffer = generate_comparison_plot(
+                    track_name=track_name,
+                    results_dict=valid_results,
+                    track_coords=track_coords,
+                    dpi=150
+                )
+                
+                # Show stats to confirm difference
+                lap_times = [res['time'][-1] for res in valid_results.values()]
+                diff_t = max(lap_times) - min(lap_times)
+                st.info(f"📊 Comparing {len(valid_results)} vehicles. Lap time spread: {diff_t:.3f}s")
+
+                # Single download button for comparison
+                st.download_button(
+                    label=f"📥 Export All Vehicles Comparison",
+                    data=comparison_buffer,
+                    file_name=f"{track_name}_comparison.png",
+                    mime="image/png",
+                    key="download_comparison"
+                )
+        except Exception as e:
+            st.error(f"Error generating comparison: {e}")
+    
     st.divider()
     
     # Prepare Combined DataFrame
